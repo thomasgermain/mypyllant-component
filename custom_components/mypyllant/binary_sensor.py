@@ -59,18 +59,17 @@ async def async_setup_entry(
         if system.ambisense_rooms:
             for room_index, room in enumerate(system.ambisense_rooms):
                 for device in room.room_configuration.devices:
-                    if device.unreach is not None:
-                        sensors.append(
-                            lambda: AmbisenseDeviceLowBattery(
-                                index, room_index, device, coordinator
-                            )
+                    # Always created, low_bat or unreach can be temporarily unknown
+                    sensors.append(
+                        lambda: AmbisenseDeviceLowBattery(
+                            index, room_index, device, coordinator
                         )
-                    if device.low_bat is not None:
-                        sensors.append(
-                            lambda: AmbisenseDeviceUnreachable(
-                                index, room_index, device, coordinator
-                            )
+                    )
+                    sensors.append(
+                        lambda: AmbisenseDeviceUnreachable(
+                            index, room_index, device, coordinator
                         )
+                    )
 
     async_add_entities(sensors)  # type: ignore
 
@@ -335,7 +334,7 @@ class AmbisenseDeviceUnreachable(AmbisenseDeviceCoordinatorEntity, BinarySensorE
     @property
     def is_on(self) -> bool | None:
         device = self.device
-        if device is None:
+        if device is None or device.unreach is None:
             return None
         return not device.unreach
 

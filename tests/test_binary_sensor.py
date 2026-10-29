@@ -166,6 +166,48 @@ async def test_ambisense_device_state_follows_coordinator_update(
         await mocked_api.aiohttp_session.close()
 
 
+async def test_ambisense_device_entities_created_with_unknown_values(
+    hass,
+    mypyllant_aioresponses,
+    mocked_api: MyPyllantAPI,
+    system_coordinator_mock: SystemCoordinator,
+):
+    # ambisense2.yaml contains an unreachable device with lowBat: null
+    test_data = load_test_data(DATA_DIR / "ambisense2.yaml")
+    with mypyllant_aioresponses(test_data) as _:
+        entities = await _setup_ambisense_device_entities(hass, system_coordinator_mock)
+        devices = _ambisense_devices(system_coordinator_mock.data[0])
+        assert any(d.low_bat is None for d in devices)
+        for device in devices:
+            device_entities = [e for e in entities if e.sgtin == device.sgtin]
+            assert {type(e) for e in device_entities} == {
+                AmbisenseDeviceLowBattery,
+                AmbisenseDeviceUnreachable,
+            }
+
+        # Values unknown at setup time must not prevent the entities from being created
+        system_coordinator_mock.data = (
+            await system_coordinator_mock._async_update_data()
+        )
+        for device in _ambisense_devices(system_coordinator_mock.data[0]):
+            device.low_bat = None
+            device.unreach = None
+        config_entry = get_config_entry()
+        hass.data[DOMAIN][config_entry.entry_id] = {
+            "system_coordinator": system_coordinator_mock
+        }
+        mock = Mock(return_value=None)
+        await async_setup_entry(hass, config_entry, mock)
+        unknown_entities = [
+            e for e in mock.call_args.args[0] if isinstance(e, AmbisenseDeviceSensor)
+        ]
+        assert len(unknown_entities) == 2 * len(devices)
+        for entity in unknown_entities:
+            assert entity.available
+            assert entity.is_on is None
+        await mocked_api.aiohttp_session.close()
+
+
 async def test_ambisense_device_unavailable_when_missing(
     hass,
     mypyllant_aioresponses,
@@ -209,4 +251,25 @@ async def test_ambisense_device_unavailable_when_missing(
         missing_room = AmbisenseCoordinatorEntity(0, 99, system_coordinator_mock)
         assert missing_room.available is False
         assert isinstance(missing_room.name_prefix, str)
+        await mocked_api.aiohttp_session.close()
+
+
+async def test_ambisense_device_unique_id(
+    hass,
+    mypyllant_aioresponses,
+    mocked_api: MyPyllantAPI,
+    system_coordinator_mock: SystemCoordinator,
+):
+    # Unique IDs are based on the position of the room in the API response
+    # (not AmbisenseRoom.room_index) and must stay unchanged
+    test_data = load_test_data(DATA_DIR / "ambisense2.yaml")
+    with mypyllant_aioresponses(test_data) as _:
+        entities = await _setup_ambisense_device_entities(hass, system_coordinator_mock)
+        system = system_coordinator_mock.data[0]
+        expected = set()
+        for position, room in enumerate(system.ambisense_rooms):
+            for device in room.room_configuration.devices:
+                prefix = f"{DOMAIN}_{system.id}_room_{position}_device_{device.sgtin}"
+                expected |= {f"{prefix}_low_bat", f"{prefix}_unreach"}
+        assert {e.unique_id for e in entities} == expected
         await mocked_api.aiohttp_session.close()
