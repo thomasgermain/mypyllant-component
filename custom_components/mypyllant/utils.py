@@ -370,14 +370,32 @@ class AmbisenseCoordinatorEntity(CoordinatorEntity):
         return self.coordinator.data[self.system_index]
 
     @property
+    def room_or_none(self) -> AmbisenseRoom | None:
+        return next(
+            (r for r in self.system.ambisense_rooms if r.room_index == self.room_index),
+            None,
+        )
+
+    @property
     def room(self) -> AmbisenseRoom:
-        return [
-            r for r in self.system.ambisense_rooms if r.room_index == self.room_index
-        ][0]
+        room = self.room_or_none
+        if room is None:
+            raise ValueError(
+                f"Ambisense room {self.room_index} not found in system {self.system.id}"
+            )
+        return room
+
+    @property
+    def available(self) -> bool:
+        return super().available and self.room_or_none is not None
 
     @property
     def name_prefix(self) -> str:
-        return f"{self.system.home.home_name or self.system.home.nomenclature} {self.room.name}"
+        room = self.room_or_none
+        room_name = room.name if room is not None else f"Room {self.room_index}"
+        return (
+            f"{self.system.home.home_name or self.system.home.nomenclature} {room_name}"
+        )
 
     @property
     def id_infix(self) -> str:
@@ -405,15 +423,46 @@ class AmbisenseDeviceCoordinatorEntity(AmbisenseCoordinatorEntity):
         coordinator: SystemCoordinator,
     ) -> None:
         super().__init__(system_index, room_index, coordinator)
-        self.device = device
+        # Only keep the stable identifier, the device is looked up in the
+        # coordinator data so its state follows updates
+        self.sgtin = device.sgtin
+
+    @property
+    def room_or_none(self) -> AmbisenseRoom | None:
+        """
+        The room currently containing the device
+
+        room_index is the position of the room at setup time and is part of the unique ID,
+        but it doesn't necessarily match AmbisenseRoom.room_index, so the room is looked up by device
+        """
+        return next(
+            (
+                r
+                for r in self.system.ambisense_rooms
+                if any(d.sgtin == self.sgtin for d in r.room_configuration.devices)
+            ),
+            None,
+        )
+
+    @property
+    def device(self) -> AmbisenseDevice | None:
+        room = self.room_or_none
+        if room is None:
+            return None
+        return next(
+            (d for d in room.room_configuration.devices if d.sgtin == self.sgtin),
+            None,
+        )
 
     @property
     def name_prefix(self) -> str:
-        return f"{self.system.home.home_name or self.system.home.nomenclature} {self.device.name}"
+        device = self.device
+        device_name = device.name if device is not None else self.sgtin
+        return f"{self.system.home.home_name or self.system.home.nomenclature} {device_name}"
 
     @property
     def id_infix(self) -> str:
-        return f"{self.system.id}_room_{self.room_index}_device_{self.device.sgtin}"
+        return f"{self.system.id}_room_{self.room_index}_device_{self.sgtin}"
 
     @property
     def unique_id_fragment(self) -> str:

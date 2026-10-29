@@ -304,7 +304,10 @@ class AmbisenseDeviceLowBattery(AmbisenseDeviceCoordinatorEntity, BinarySensorEn
 
     @property
     def is_on(self) -> bool | None:
-        return self.device.low_bat
+        device = self.device
+        if device is None:
+            return None
+        return device.low_bat
 
     @property
     def unique_id(self) -> str:
@@ -331,7 +334,10 @@ class AmbisenseDeviceUnreachable(AmbisenseDeviceCoordinatorEntity, BinarySensorE
 
     @property
     def is_on(self) -> bool | None:
-        return not self.device.unreach
+        device = self.device
+        if device is None:
+            return None
+        return not device.unreach
 
     @property
     def unique_id(self) -> str:
